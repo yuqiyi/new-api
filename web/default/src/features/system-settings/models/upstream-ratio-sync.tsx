@@ -69,6 +69,7 @@ type UpstreamRatioSyncProps = {
     CacheRatio: string
     CreateCacheRatio: string
     ImageRatio: string
+    ImageOutputRatio: string
     AudioRatio: string
     AudioCompletionRatio: string
     'billing_setting.billing_mode': string
@@ -341,6 +342,7 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
       CacheRatio: parseJsonRecord<number>(modelRatios.CacheRatio),
       CreateCacheRatio: parseJsonRecord<number>(modelRatios.CreateCacheRatio),
       ImageRatio: parseJsonRecord<number>(modelRatios.ImageRatio),
+      ImageOutputRatio: parseJsonRecord<number>(modelRatios.ImageOutputRatio),
       AudioRatio: parseJsonRecord<number>(modelRatios.AudioRatio),
       AudioCompletionRatio: parseJsonRecord<number>(
         modelRatios.AudioCompletionRatio
@@ -368,6 +370,7 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
       currentRatios.CacheRatio[model] !== undefined ||
       currentRatios.CreateCacheRatio[model] !== undefined ||
       currentRatios.ImageRatio[model] !== undefined ||
+      currentRatios.ImageOutputRatio[model] !== undefined ||
       currentRatios.AudioRatio[model] !== undefined ||
       currentRatios.AudioCompletionRatio[model] !== undefined
     )
@@ -383,6 +386,7 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
         CacheRatio: { ...currentRatios.CacheRatio },
         CreateCacheRatio: { ...currentRatios.CreateCacheRatio },
         ImageRatio: { ...currentRatios.ImageRatio },
+        ImageOutputRatio: { ...currentRatios.ImageOutputRatio },
         AudioRatio: { ...currentRatios.AudioRatio },
         AudioCompletionRatio: { ...currentRatios.AudioCompletionRatio },
         ModelPrice: { ...currentRatios.ModelPrice },
@@ -407,6 +411,7 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
           delete finalRatios.CacheRatio[model]
           delete finalRatios.CreateCacheRatio[model]
           delete finalRatios.ImageRatio[model]
+          delete finalRatios.ImageOutputRatio[model]
           delete finalRatios.AudioRatio[model]
           delete finalRatios.AudioCompletionRatio[model]
         }

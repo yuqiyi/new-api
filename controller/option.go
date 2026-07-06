@@ -241,6 +241,14 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "ImageOutputRatio":
+		err = ratio_setting.UpdateImageOutputRatioByJSONString(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "图片输出倍率设置失败: " + err.Error(),
+			})
+		}
 	case "AudioRatio":
 		err = ratio_setting.UpdateAudioRatioByJSONString(option.Value.(string))
 		if err != nil {

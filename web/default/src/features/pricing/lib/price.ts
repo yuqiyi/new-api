@@ -104,6 +104,10 @@ function calculateTokenPrice(
       return hasRatio(model.image_ratio)
         ? base * Number(model.image_ratio)
         : NaN
+    case 'image_output':
+      return hasRatio(model.image_output_ratio)
+          ? base * Number(model.image_output_ratio)
+          : NaN
     case 'audio_input':
       return hasRatio(model.audio_ratio)
         ? base * Number(model.audio_ratio)

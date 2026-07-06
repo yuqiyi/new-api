@@ -336,6 +336,7 @@ func InitRatioSettings() {
 	cacheRatioMap.AddAll(defaultCacheRatio)
 	createCacheRatioMap.AddAll(defaultCreateCacheRatio)
 	imageRatioMap.AddAll(defaultImageRatio)
+	imageOutputRatioMap.AddAll(defaultImageOutputRatio)
 	audioRatioMap.AddAll(defaultAudioRatio)
 	audioCompletionRatioMap.AddAll(defaultAudioCompletionRatio)
 }
@@ -650,7 +651,15 @@ func ModelRatio2JSONString() string {
 var defaultImageRatio = map[string]float64{
 	"gpt-image-1": 2,
 }
+var defaultImageOutputRatio = map[string]float64{
+	"gemini-3-pro-image":             60,
+	"gemini-3-pro-image-preview":     60,
+	"gemini-3.1-flash-image":         30,
+	"gemini-3.1-flash-image-preview": 30,
+	"gemini-3.1-flash-image-lite":    15,
+}
 var imageRatioMap = types.NewRWMap[string, float64]()
+var imageOutputRatioMap = types.NewRWMap[string, float64]()
 var audioRatioMap = types.NewRWMap[string, float64]()
 var audioCompletionRatioMap = types.NewRWMap[string, float64]()
 
@@ -664,6 +673,22 @@ func UpdateImageRatioByJSONString(jsonStr string) error {
 
 func GetImageRatio(name string) (float64, bool) {
 	ratio, ok := imageRatioMap.Get(name)
+	if !ok {
+		return 1, false // Default to 1 if not found
+	}
+	return ratio, true
+}
+
+func ImageOutputRatio2JSONString() string {
+	return imageOutputRatioMap.MarshalJSONString()
+}
+
+func UpdateImageOutputRatioByJSONString(jsonStr string) error {
+	return types.LoadFromJsonString(imageOutputRatioMap, jsonStr)
+}
+
+func GetImageOutputRatio(name string) (float64, bool) {
+	ratio, ok := imageOutputRatioMap.Get(name)
 	if !ok {
 		return 1, false // Default to 1 if not found
 	}
@@ -700,6 +725,10 @@ func GetCompletionRatioCopy() map[string]float64 {
 
 func GetImageRatioCopy() map[string]float64 {
 	return imageRatioMap.ReadAll()
+}
+
+func GetImageOutputRatioCopy() map[string]float64 {
+	return imageOutputRatioMap.ReadAll()
 }
 
 func GetAudioRatioCopy() map[string]float64 {

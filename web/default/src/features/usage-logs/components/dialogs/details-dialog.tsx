@@ -278,6 +278,13 @@ function BillingBreakdown(props: {
         value: `${fmtPrice(baseInputUSD * other.image_ratio)}/M`,
       })
     }
+
+    if (other.image_output_ratio != null && other.image_output_ratio !== 1) {
+      rows.push({
+        label: t('Image output'),
+        value: `${fmtPrice(baseInputUSD * other.image_output_ratio)}/M`,
+      })
+    }
   }
 
   if (other.web_search && other.web_search_call_count) {
@@ -387,6 +394,13 @@ function TokenBreakdown(props: { log: UsageLog; other: LogOtherData }) {
     rows.push({
       label: t('Image Tokens'),
       value: other.image_output.toLocaleString(),
+    })
+  }
+
+  if (other.image_output_cal && other.image_output_tokens) {
+    rows.push({
+      label: t('Image Output Tokens'),
+      value: other.image_output_tokens.toLocaleString(),
     })
   }
 

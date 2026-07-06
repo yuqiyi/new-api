@@ -103,6 +103,7 @@ const extendedModelFormSchema = z.object({
   cacheRatio: z.string().optional(),
   completionRatio: z.string().optional(),
   imageRatio: z.string().optional(),
+  imageOutputRatio: z.string().optional(),
   audioRatio: z.string().optional(),
   audioCompletionRatio: z.string().optional(),
 })
@@ -186,6 +187,7 @@ export function ModelMutateDrawer({
       CacheRatio: '',
       CompletionRatio: '',
       ImageRatio: '',
+      ImageOutputRatio: '',
       AudioRatio: '',
       AudioCompletionRatio: '',
       ExposeRatioEnabled: false,
@@ -242,6 +244,7 @@ export function ModelMutateDrawer({
       cacheRatio: '',
       completionRatio: '',
       imageRatio: '',
+      imageOutputRatio: '',
       audioRatio: '',
       audioCompletionRatio: '',
     },
@@ -302,6 +305,7 @@ export function ModelMutateDrawer({
         cacheRatio: '',
         completionRatio: '',
         imageRatio: '',
+        imageOutputRatio: '',
         audioRatio: '',
         audioCompletionRatio: '',
       }
@@ -328,6 +332,10 @@ export function ModelMutateDrawer({
           modelSettings.ImageRatio,
           { fallback: {}, silent: true }
         )
+        const imageOutputMap = safeJsonParse<Record<string, number>>(
+          modelSettings.ImageOutputRatio,
+          { fallback: {}, silent: true }
+        )
         const audioMap = safeJsonParse<Record<string, number>>(
           modelSettings.AudioRatio,
           { fallback: {}, silent: true }
@@ -344,6 +352,7 @@ export function ModelMutateDrawer({
         const cacheRatio = cacheMap[modelName]
         const completionRatio = completionMap[modelName]
         const imageRatio = imageMap[modelName]
+        const imageOutputRatio = imageOutputMap[modelName]
         const audioRatio = audioMap[modelName]
         const audioCompletionRatio = audioCompletionMap[modelName]
 
@@ -370,11 +379,12 @@ export function ModelMutateDrawer({
             cacheRatio: cacheRatio?.toString() || '',
             completionRatio: completionRatio?.toString() || '',
             imageRatio: imageRatio?.toString() || '',
+            imageOutputRatio: imageOutputRatio?.toString() || '',
             audioRatio: audioRatio?.toString() || '',
             audioCompletionRatio: audioCompletionRatio?.toString() || '',
           })
           setAdvancedOpen(
-            !!(cacheRatio || imageRatio || audioRatio || audioCompletionRatio)
+            !!(cacheRatio || imageRatio || imageOutputRatio || audioRatio || audioCompletionRatio)
           )
         }
       } else {
@@ -406,6 +416,7 @@ export function ModelMutateDrawer({
         cacheRatio: '',
         completionRatio: '',
         imageRatio: '',
+        imageOutputRatio: '',
         audioRatio: '',
         audioCompletionRatio: '',
       })
@@ -431,6 +442,7 @@ export function ModelMutateDrawer({
           cacheRatio,
           completionRatio,
           imageRatio,
+          imageOutputRatio,
           audioRatio,
           audioCompletionRatio,
           ...modelData
@@ -453,6 +465,7 @@ export function ModelMutateDrawer({
                 values.cacheRatio ||
                 values.completionRatio ||
                 values.imageRatio ||
+                values.imageOutputRatio ||
                 values.audioRatio ||
                 values.audioCompletionRatio))
 
@@ -478,6 +491,10 @@ export function ModelMutateDrawer({
             )
             const imageMap = safeJsonParse<Record<string, number>>(
               modelSettings.ImageRatio,
+              { fallback: {}, silent: true }
+            )
+            const imageOutputMap = safeJsonParse<Record<string, number>>(
+              modelSettings.ImageOutputRatio,
               { fallback: {}, silent: true }
             )
             const audioMap = safeJsonParse<Record<string, number>>(
@@ -535,6 +552,11 @@ export function ModelMutateDrawer({
                 if (values.imageRatio && values.imageRatio !== '') {
                   imageMap[finalModelName] = Number.parseFloat(
                     values.imageRatio
+                  )
+                }
+                if (values.imageOutputRatio && values.imageOutputRatio !== '') {
+                  imageOutputMap[finalModelName] = Number.parseFloat(
+                    values.imageOutputRatio
                   )
                 }
                 if (values.audioRatio && values.audioRatio !== '') {
@@ -595,6 +617,13 @@ export function ModelMutateDrawer({
               newImageRatio !== normalizeJsonString(modelSettings.ImageRatio)
             ) {
               updates.push({ key: 'ImageRatio', value: newImageRatio })
+            }
+
+            const newImageOutputRatio = normalizeJsonString(JSON.stringify(imageOutputMap))
+            if (
+              newImageOutputRatio !== normalizeJsonString(modelSettings.ImageOutputRatio)
+            ) {
+              updates.push({ key: 'ImageOutputRatio', value: newImageOutputRatio })
             }
 
             const newAudioRatio = normalizeJsonString(JSON.stringify(audioMap))
@@ -1196,6 +1225,33 @@ export function ModelMutateDrawer({
                             <FormMessage />
                           </FormItem>
                         )}
+                      />
+
+                      <FormField
+                          control={form.control}
+                          name='imageOutputRatio'
+                          render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Image output ratio')}</FormLabel>
+                                <FormControl>
+                                  <Input
+                                      type='text'
+                                      placeholder='1.0'
+                                      {...field}
+                                      onChange={(e) => {
+                                        const value = e.target.value
+                                        if (validateNumber(value)) {
+                                          field.onChange(value)
+                                        }
+                                      }}
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  {t('Multiplier for image processing.')}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                          )}
                       />
 
                       <FormField
