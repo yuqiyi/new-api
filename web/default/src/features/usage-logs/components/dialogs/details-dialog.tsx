@@ -285,6 +285,27 @@ function BillingBreakdown(props: {
         value: `${fmtPrice(baseInputUSD * other.image_output_ratio)}/M`,
       })
     }
+
+    if (other.video_seconds != null && other.video_seconds !== 0) {
+      rows.push({
+        label: t('Video seconds'),
+        value: `${other.video_seconds}s`,
+      })
+    }
+
+    if (other.video_resolution != null && other.video_resolution !== '') {
+      rows.push({
+        label: t('Video resolution'),
+        value: `${other.video_resolution}`,
+      })
+    }
+
+    if (other.video_seconds_price != null && other.video_seconds_price !== 0) {
+      rows.push({
+        label: t('Video seconds price'),
+        value: `${fmtPrice(other.video_seconds_price)}/s`,
+      })
+    }
   }
 
   if (other.web_search && other.web_search_call_count) {

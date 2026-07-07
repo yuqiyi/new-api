@@ -110,9 +110,10 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 	if seconds == 0 {
 		seconds = req.Duration
 	}
-	if seconds <= 0 {
+	if !strings.HasPrefix(info.OriginModelName, "veo-3.1") && seconds <= 0 {
 		seconds = 4
 	}
+	info.VideoSeconds = seconds
 
 	size := req.Size
 	if size == "" {
@@ -126,6 +127,26 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 	if size == "1792x1024" || size == "1024x1792" {
 		ratios["size"] = 1.666667
 	}
+	info.VideoResolution = size
+	// 临时兼容veo3.1分辨率
+	if strings.HasPrefix(info.OriginModelName, "veo-3.1-fast") {
+		info.VideoResolution = req.Metadata["resolution"].(string)
+		if req.Metadata["resolution"] == "720p" {
+			ratios["size"] = 1
+		} else if req.Metadata["resolution"] == "1080p" {
+			ratios["size"] = 1.2
+		} else if req.Metadata["resolution"] == "4k" {
+			ratios["size"] = 3
+		}
+	} else if strings.HasPrefix(info.OriginModelName, "veo-3.1") {
+		info.VideoResolution = req.Metadata["resolution"].(string)
+		if req.Metadata["resolution"] == "720p" || req.Metadata["resolution"] == "1080p" {
+			ratios["size"] = 1
+		} else if req.Metadata["resolution"] == "4k" {
+			ratios["size"] = 1.5
+		}
+	}
+	info.VideoPriceSize = ratios["size"]
 	return ratios
 }
 

@@ -167,6 +167,7 @@ export interface LogOtherData {
   image?: boolean
   image_ratio?: number
   image_output?: number
+  image_output_ratio?: number
   web_search?: boolean
   web_search_call_count?: number
   web_search_price?: number
@@ -193,6 +194,9 @@ export interface LogOtherData {
   violation_fee?: boolean
   violation_fee_code?: string
   violation_fee_marker?: string
+  video_seconds?: number
+  video_resolution?: string
+  video_seconds_price?: number
   fee_quota?: number
   // Reject / intercept reason (admin)
   reject_reason?: string

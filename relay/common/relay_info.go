@@ -109,6 +109,9 @@ type RelayInfo struct {
 	DisablePing            bool // 是否禁止向下游发送自定义 Ping
 	ClientWs               *websocket.Conn
 	TargetWs               *websocket.Conn
+	VideoResolution        string
+	VideoSeconds           int
+	VideoPriceSize         float64
 	InputAudioFormat       string
 	OutputAudioFormat      string
 	RealtimeTools          []dto.RealTimeTool
