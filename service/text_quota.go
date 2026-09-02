@@ -18,6 +18,8 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	hosttypes "github.com/QuantumNous/new-api/types"
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
@@ -233,63 +235,13 @@ func composeTieredTextQuota(relayInfo *relaycommon.RelayInfo, summary textQuotaS
 // calculateTextQuotaSummary expects a usage already remapped by
 // effectiveBillingUsage; PostTextConsumeQuota performs that remap once and shares
 // the result with tiered billing, affinity observation and logging.
-func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage) textQuotaSummary {
-	summary := textQuotaSummary{
-		ModelName:            relayInfo.OriginModelName,
-		TokenName:            ctx.GetString("token_name"),
-		UseTimeSeconds:       time.Now().Unix() - relayInfo.StartTime.Unix(),
-		CompletionRatio:      relayInfo.PriceData.CompletionRatio,
-		CacheRatio:           relayInfo.PriceData.CacheRatio,
-		ImageRatio:           relayInfo.PriceData.ImageRatio,
-		ImageOutputRatio:     relayInfo.PriceData.ImageOutputRatio,
-		VideoOutputRatio:     relayInfo.PriceData.VideoOutputRatio,
-		ModelRatio:           relayInfo.PriceData.ModelRatio,
-		GroupRatio:           relayInfo.PriceData.GroupRatioInfo.GroupRatio,
-		ModelPrice:           relayInfo.PriceData.ModelPrice,
-		CacheCreationRatio:   relayInfo.PriceData.CacheCreationRatio,
-		CacheCreationRatio5m: relayInfo.PriceData.CacheCreation5mRatio,
-		CacheCreationRatio1h: relayInfo.PriceData.CacheCreation1hRatio,
-		UsageSemantic:        usageSemanticFromUsage(relayInfo, usage),
-	}
-	summary.IsClaudeUsageSemantic = summary.UsageSemantic == "anthropic"
-
-	if usage == nil {
-		usage = &dto.Usage{
-			PromptTokens:     relayInfo.GetEstimatePromptTokens(),
-			CompletionTokens: 0,
-			TotalTokens:      relayInfo.GetEstimatePromptTokens(),
-		}
-	}
-
-	summary.PromptTokens = usage.PromptTokens
-	summary.CompletionTokens = usage.CompletionTokens
-	summary.TotalTokens = usage.PromptTokens + usage.CompletionTokens
-	summary.CacheTokens = usage.PromptTokensDetails.CachedTokens
-	summary.CacheCreationTokens = usage.PromptTokensDetails.CacheCreationTokensTotal()
-	summary.CacheCreationTokens5m = usage.ClaudeCacheCreation5mTokens
-	summary.CacheCreationTokens1h = usage.ClaudeCacheCreation1hTokens
-	summary.ImageTokens = usage.PromptTokensDetails.ImageTokens
-	summary.ImageOutputTokens = usage.CompletionTokenDetails.ImageTokens
-	summary.VideoTokens = usage.PromptTokensDetails.VideoTokens
-	summary.VideoOutputTokens = usage.CompletionTokenDetails.VideoTokens
-	summary.AudioTokens = usage.PromptTokensDetails.AudioTokens
-	legacyClaudeDerived := isLegacyClaudeDerivedOpenAIUsage(relayInfo, usage)
-	isOpenRouterClaudeBilling := relayInfo.ChannelMeta != nil &&
-		relayInfo.ChannelType == constant.ChannelTypeOpenRouter &&
-		summary.IsClaudeUsageSemantic
-
-	if isOpenRouterClaudeBilling {
-		summary.PromptTokens -= summary.CacheTokens
-		isUsingCustomSettings := relayInfo.PriceData.UsePrice || hasCustomModelRatio(summary.ModelName, relayInfo.PriceData.ModelRatio)
-		if summary.CacheCreationTokens == 0 && relayInfo.PriceData.CacheCreationRatio != 1 && usage.Cost != 0 && !isUsingCustomSettings {
-			maybeCacheCreationTokens := CalcOpenRouterCacheCreateTokens(*usage, relayInfo.PriceData)
-			if maybeCacheCreationTokens >= 0 && summary.PromptTokens >= maybeCacheCreationTokens {
-				summary.CacheCreationTokens = maybeCacheCreationTokens
-			}
-		}
-		summary.PromptTokens -= summary.CacheCreationTokens
-	}
-
+// computeTokenQuota runs the modality-aware token arithmetic that turns a usage
+// breakdown into a quota. It is shared by the synchronous relay path and by async
+// task settlement: a Gemini background interaction reports the same usage shape as
+// its synchronous counterpart, so both must be charged identically.
+// summary.ToolCallSurchargeQuota must already be set by the caller.
+func (summary *textQuotaSummary) computeTokenQuota(priceData hosttypes.PriceData, legacyClaudeDerived bool) *common.QuotaClamp {
+	var resultClamp *common.QuotaClamp
 	dPromptTokens := decimal.NewFromInt(int64(summary.PromptTokens))
 	dCacheTokens := decimal.NewFromInt(int64(summary.CacheTokens))
 	dImageTokens := decimal.NewFromInt(int64(summary.ImageTokens))
@@ -312,10 +264,9 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
 
 	ratio := dModelRatio.Mul(dGroupRatio)
-	summary.ToolCallSurchargeQuota = calculateTextToolCallSurcharge(ctx, relayInfo, &summary)
 
 	var audioInputQuota decimal.Decimal
-	if !relayInfo.PriceData.UsePrice {
+	if !priceData.UsePrice {
 		baseTokens := dPromptTokens
 
 		var cachedTokensWithRatio decimal.Decimal
@@ -388,7 +339,7 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		completionQuota := dCompletionTokens.Mul(dCompletionRatio)
 		quotaCalculateDecimal := promptQuota.Add(completionQuota).Add(imageOutputQuota).Add(videoOutputQuota).Mul(ratio)
 		quotaCalculateDecimal = quotaCalculateDecimal.Add(audioInputQuota)
-		quotaCalculateDecimal = relayInfo.PriceData.ApplyOtherRatiosToDecimal(quotaCalculateDecimal)
+		quotaCalculateDecimal = priceData.ApplyOtherRatiosToDecimal(quotaCalculateDecimal)
 		quotaCalculateDecimal = quotaCalculateDecimal.Add(summary.ToolCallSurchargeQuota)
 
 		if !ratio.IsZero() && quotaCalculateDecimal.LessThanOrEqual(decimal.Zero) {
@@ -396,15 +347,15 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		}
 		quota, clamp := common.QuotaFromDecimalChecked(quotaCalculateDecimal)
 		summary.Quota = quota
-		noteQuotaClamp(relayInfo, clamp)
+		resultClamp = clamp
 	} else {
 		quotaCalculateDecimal := dModelPrice.Mul(dQuotaPerUnit).Mul(dGroupRatio)
 		quotaCalculateDecimal = quotaCalculateDecimal.Add(audioInputQuota)
-		quotaCalculateDecimal = relayInfo.PriceData.ApplyOtherRatiosToDecimal(quotaCalculateDecimal)
+		quotaCalculateDecimal = priceData.ApplyOtherRatiosToDecimal(quotaCalculateDecimal)
 		quotaCalculateDecimal = quotaCalculateDecimal.Add(summary.ToolCallSurchargeQuota)
 		quota, clamp := common.QuotaFromDecimalChecked(quotaCalculateDecimal)
 		summary.Quota = quota
-		noteQuotaClamp(relayInfo, clamp)
+		resultClamp = clamp
 	}
 
 	if !summary.hasBillableUsage() {
@@ -412,6 +363,69 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	} else if !ratio.IsZero() && summary.Quota == 0 {
 		summary.Quota = 1
 	}
+
+	return resultClamp
+}
+
+func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage) textQuotaSummary {
+	summary := textQuotaSummary{
+		ModelName:            relayInfo.OriginModelName,
+		TokenName:            ctx.GetString("token_name"),
+		UseTimeSeconds:       time.Now().Unix() - relayInfo.StartTime.Unix(),
+		CompletionRatio:      relayInfo.PriceData.CompletionRatio,
+		CacheRatio:           relayInfo.PriceData.CacheRatio,
+		ImageRatio:           relayInfo.PriceData.ImageRatio,
+		ImageOutputRatio:     relayInfo.PriceData.ImageOutputRatio,
+		VideoOutputRatio:     relayInfo.PriceData.VideoOutputRatio,
+		ModelRatio:           relayInfo.PriceData.ModelRatio,
+		GroupRatio:           relayInfo.PriceData.GroupRatioInfo.GroupRatio,
+		ModelPrice:           relayInfo.PriceData.ModelPrice,
+		CacheCreationRatio:   relayInfo.PriceData.CacheCreationRatio,
+		CacheCreationRatio5m: relayInfo.PriceData.CacheCreation5mRatio,
+		CacheCreationRatio1h: relayInfo.PriceData.CacheCreation1hRatio,
+		UsageSemantic:        usageSemanticFromUsage(relayInfo, usage),
+	}
+	summary.IsClaudeUsageSemantic = summary.UsageSemantic == "anthropic"
+
+	if usage == nil {
+		usage = &dto.Usage{
+			PromptTokens:     relayInfo.GetEstimatePromptTokens(),
+			CompletionTokens: 0,
+			TotalTokens:      relayInfo.GetEstimatePromptTokens(),
+		}
+	}
+
+	summary.PromptTokens = usage.PromptTokens
+	summary.CompletionTokens = usage.CompletionTokens
+	summary.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	summary.CacheTokens = usage.PromptTokensDetails.CachedTokens
+	summary.CacheCreationTokens = usage.PromptTokensDetails.CacheCreationTokensTotal()
+	summary.CacheCreationTokens5m = usage.ClaudeCacheCreation5mTokens
+	summary.CacheCreationTokens1h = usage.ClaudeCacheCreation1hTokens
+	summary.ImageTokens = usage.PromptTokensDetails.ImageTokens
+	summary.ImageOutputTokens = usage.CompletionTokenDetails.ImageTokens
+	summary.VideoTokens = usage.PromptTokensDetails.VideoTokens
+	summary.VideoOutputTokens = usage.CompletionTokenDetails.VideoTokens
+	summary.AudioTokens = usage.PromptTokensDetails.AudioTokens
+	legacyClaudeDerived := isLegacyClaudeDerivedOpenAIUsage(relayInfo, usage)
+	isOpenRouterClaudeBilling := relayInfo.ChannelMeta != nil &&
+		relayInfo.ChannelType == constant.ChannelTypeOpenRouter &&
+		summary.IsClaudeUsageSemantic
+
+	if isOpenRouterClaudeBilling {
+		summary.PromptTokens -= summary.CacheTokens
+		isUsingCustomSettings := relayInfo.PriceData.UsePrice || hasCustomModelRatio(summary.ModelName, relayInfo.PriceData.ModelRatio)
+		if summary.CacheCreationTokens == 0 && relayInfo.PriceData.CacheCreationRatio != 1 && usage.Cost != 0 && !isUsingCustomSettings {
+			maybeCacheCreationTokens := CalcOpenRouterCacheCreateTokens(*usage, relayInfo.PriceData)
+			if maybeCacheCreationTokens >= 0 && summary.PromptTokens >= maybeCacheCreationTokens {
+				summary.CacheCreationTokens = maybeCacheCreationTokens
+			}
+		}
+		summary.PromptTokens -= summary.CacheCreationTokens
+	}
+
+	summary.ToolCallSurchargeQuota = calculateTextToolCallSurcharge(ctx, relayInfo, &summary)
+	noteQuotaClamp(relayInfo, summary.computeTokenQuota(relayInfo.PriceData, legacyClaudeDerived))
 
 	return summary
 }
@@ -585,4 +599,120 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	gopool.Go(func() {
 		perfmetrics.RecordRelaySample(relayInfo, true, int64(summary.CompletionTokens))
 	})
+}
+
+// AsyncBillingBreakdown carries the per-modality token counts and the ratios
+// that produced an async settlement, so the task log can show the same
+// arithmetic a synchronous request displays instead of only the final amount.
+type AsyncBillingBreakdown map[string]any
+
+// SettleAsyncInteractionQuota computes the quota for an async task that
+// completed with a usage payload identical in shape to the synchronous relay
+// response. Gemini background interactions return the same `usage` object as
+// their synchronous counterpart, so reusing the synchronous arithmetic keeps
+// background and foreground requests charged identically instead of collapsing
+// video output into the blended text rate.
+//
+// Ratios are read from the live settings using modelName rather than from the
+// task's billing snapshot, matching RecalculateTaskQuotaByTokens.
+func SettleAsyncInteractionQuota(modelName string, groupRatio float64, usage *dto.Usage, otherRatios map[string]float64) (int, *common.QuotaClamp) {
+	quota, clamp, _ := SettleAsyncInteractionQuotaDetailed(modelName, groupRatio, usage, otherRatios)
+	return quota, clamp
+}
+
+// SettleAsyncInteractionQuotaDetailed additionally returns the breakdown of the
+// settlement so callers can attach it to the consume log.
+func SettleAsyncInteractionQuotaDetailed(modelName string, groupRatio float64, usage *dto.Usage, otherRatios map[string]float64) (int, *common.QuotaClamp, AsyncBillingBreakdown) {
+	if usage == nil {
+		return 0, nil, nil
+	}
+	modelRatio, _, _ := ratio_setting.GetModelRatio(modelName)
+	cacheRatio, _ := ratio_setting.GetCacheRatio(modelName)
+	cacheCreationRatio, _ := ratio_setting.GetCreateCacheRatio(modelName)
+	imageRatio, _ := ratio_setting.GetImageRatio(modelName)
+	imageOutputRatio, _ := ratio_setting.GetImageOutputRatio(modelName)
+	videoOutputRatio, _ := ratio_setting.GetVideoOutputRatio(modelName)
+
+	summary := textQuotaSummary{
+		ModelName:            modelName,
+		ModelRatio:           modelRatio,
+		GroupRatio:           groupRatio,
+		CompletionRatio:      ratio_setting.GetCompletionRatio(modelName),
+		CacheRatio:           cacheRatio,
+		CacheCreationRatio:   cacheCreationRatio,
+		CacheCreationRatio5m: cacheCreationRatio,
+		// The 5m/1h cache-write split is Claude-only; Gemini never reports
+		// ClaudeCacheCreation1hTokens, so the base ratio is the effective one.
+		CacheCreationRatio1h: cacheCreationRatio,
+		ImageRatio:           imageRatio,
+		ImageOutputRatio:     imageOutputRatio,
+		VideoOutputRatio:     videoOutputRatio,
+
+		PromptTokens:        usage.PromptTokens,
+		CompletionTokens:    usage.CompletionTokens,
+		TotalTokens:         usage.TotalTokens,
+		CacheTokens:         usage.PromptTokensDetails.CachedTokens,
+		CacheCreationTokens: usage.PromptTokensDetails.CacheCreationTokensTotal(),
+		ImageTokens:         usage.PromptTokensDetails.ImageTokens,
+		ImageOutputTokens:   usage.CompletionTokenDetails.ImageTokens,
+		AudioTokens:         usage.PromptTokensDetails.AudioTokens,
+		VideoTokens:         usage.PromptTokensDetails.VideoTokens,
+		VideoOutputTokens:   usage.CompletionTokenDetails.VideoTokens,
+	}
+
+	priceData := hosttypes.PriceData{
+		ModelRatio:      modelRatio,
+		CompletionRatio: summary.CompletionRatio,
+		GroupRatioInfo:  hosttypes.GroupRatioInfo{GroupRatio: groupRatio},
+	}
+	for name, ratio := range otherRatios {
+		priceData.AddOtherRatio(name, ratio)
+	}
+
+	clamp := summary.computeTokenQuota(priceData, false)
+
+	// Mirror the field names the synchronous consume log uses so the task log
+	// renders the same token breakdown and ratios. Without these the log shows
+	// only the final amount, which makes the charge impossible to verify.
+	breakdown := AsyncBillingBreakdown{
+		"model_ratio":       modelRatio,
+		"group_ratio":       groupRatio,
+		"completion_ratio":  summary.CompletionRatio,
+		"prompt_tokens":     usage.PromptTokens,
+		"completion_tokens": usage.CompletionTokens,
+		"total_tokens":      summary.TotalTokens,
+	}
+	if usage.PromptTokensDetails.TextTokens > 0 {
+		breakdown["text_input"] = usage.PromptTokensDetails.TextTokens
+	}
+	if textOutput := usage.CompletionTokens - usage.CompletionTokenDetails.VideoTokens - usage.CompletionTokenDetails.ImageTokens; textOutput > 0 {
+		breakdown["text_output"] = textOutput
+	}
+	if usage.CompletionTokenDetails.ReasoningTokens > 0 {
+		breakdown["reasoning_tokens"] = usage.CompletionTokenDetails.ReasoningTokens
+	}
+	if summary.CacheTokens > 0 {
+		breakdown["cached_tokens"] = summary.CacheTokens
+		breakdown["cache_ratio"] = summary.CacheRatio
+	}
+	if summary.ImageTokens > 0 {
+		breakdown["image_input"] = summary.ImageTokens
+		breakdown["image_ratio"] = summary.ImageRatio
+	}
+	if summary.ImageOutputTokens > 0 {
+		breakdown["image_output_tokens"] = summary.ImageOutputTokens
+		breakdown["image_output_ratio"] = summary.ImageOutputRatio
+	}
+	if summary.AudioTokens > 0 {
+		breakdown["audio_input"] = summary.AudioTokens
+	}
+	if summary.VideoTokens > 0 {
+		breakdown["video_input_tokens"] = summary.VideoTokens
+	}
+	if summary.VideoOutputTokens > 0 {
+		breakdown["video_output_cal"] = true
+		breakdown["video_output_tokens"] = summary.VideoOutputTokens
+		breakdown["video_output_ratio"] = summary.VideoOutputRatio
+	}
+	return summary.Quota, clamp, breakdown
 }

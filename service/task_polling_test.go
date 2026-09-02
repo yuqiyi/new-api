@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -495,4 +496,43 @@ func TestSweepTimedOutTasksHonorsRefundRolloutBoundary(t *testing.T) {
 	assert.Contains(t, reloadedModern.FailReason, "任务超时")
 	assert.Equal(t, initialQuota+modernTaskQuota, getUserQuota(t, userID))
 	assert.Equal(t, int64(1), countLogs(t))
+}
+
+// TestRedactVideoResponseBodyTruncatesInteractionsSteps guards the database
+// against Gemini Interactions payloads. Generated media arrives as base64 under
+// steps[].content[].data — a single 8s video is ~6MB there — and that path is
+// not reachable by the response-shaped branch, so without this the whole blob
+// would be persisted on the task row.
+func TestRedactVideoResponseBodyTruncatesInteractionsSteps(t *testing.T) {
+	largeBase64 := strings.Repeat("A", 400_000)
+	body := []byte(`{
+		"id": "v1_abc",
+		"status": "completed",
+		"steps": [
+			{"type": "user_input", "content": [{"type": "text", "text": "hi"}]},
+			{"type": "thought", "signature": "sig"},
+			{"type": "model_output", "content": [{"type": "video", "mime_type": "video/mp4", "data": "` + largeBase64 + `"}]}
+		],
+		"usage": {"total_tokens": 100, "total_input_tokens": 40, "total_output_tokens": 60}
+	}`)
+
+	redacted := redactVideoResponseBody(body)
+
+	require.Less(t, len(redacted), 5000, "media base64 must not survive redaction")
+	assert.NotContains(t, string(redacted), largeBase64)
+
+	// Usage and status must survive: async settlement reads them back off the task.
+	var parsed struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+		Usage  struct {
+			TotalTokens       int `json:"total_tokens"`
+			TotalOutputTokens int `json:"total_output_tokens"`
+		} `json:"usage"`
+	}
+	require.NoError(t, common.Unmarshal(redacted, &parsed))
+	assert.Equal(t, "v1_abc", parsed.ID)
+	assert.Equal(t, "completed", parsed.Status)
+	assert.Equal(t, 100, parsed.Usage.TotalTokens)
+	assert.Equal(t, 60, parsed.Usage.TotalOutputTokens)
 }

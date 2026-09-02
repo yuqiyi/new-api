@@ -620,6 +620,31 @@ func redactVideoResponseBody(body []byte) []byte {
 			}
 		}
 	}
+	// Gemini Interactions nests generated media as base64 under
+	// steps[].content[].data, which the response-shaped branch above never
+	// reaches. A single 8s video is ~6MB there, so it must not be persisted.
+	if steps, ok := m["steps"].([]any); ok {
+		for _, step := range steps {
+			stepMap, ok := step.(map[string]any)
+			if !ok {
+				continue
+			}
+			contents, ok := stepMap["content"].([]any)
+			if !ok {
+				continue
+			}
+			for _, content := range contents {
+				contentMap, ok := content.(map[string]any)
+				if !ok {
+					continue
+				}
+				if data, ok := contentMap["data"].(string); ok {
+					contentMap["data"] = truncateBase64(data)
+				}
+			}
+		}
+	}
+
 	b, err := common.Marshal(m)
 	if err != nil {
 		return body
@@ -640,6 +665,15 @@ func truncateBase64(s string) string {
 //
 //  2. taskResult.TotalTokens > 0 → 按 token 重算
 //  3. 都不满足 → 保持预扣额度不变
+//
+// AsyncBillingExplainer is an optional interface a TaskPollingAdaptor can
+// implement to expose how it arrived at the settled quota. The breakdown is
+// merged into the consume log so an async charge is as auditable as a
+// synchronous one.
+type AsyncBillingExplainer interface {
+	ExplainBillingOnComplete(task *model.Task, taskResult *relaycommon.TaskInfo) AsyncBillingBreakdown
+}
+
 func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, taskResult *relaycommon.TaskInfo) {
 	// 0. 按次计费的任务不做差额结算
 	if bc := task.PrivateData.BillingContext; bc != nil && bc.PerCallBilling {
@@ -648,7 +682,13 @@ func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 	}
 	// 1. 优先让 adaptor 决定最终额度
 	if actualQuota := adaptor.AdjustBillingOnComplete(task, taskResult); actualQuota > 0 {
-		RecalculateTaskQuota(ctx, task, actualQuota, "adaptor计费调整")
+		// 实现了 AsyncBillingExplainer 的 adaptor 额外回传 token 明细与倍率，
+		// 让任务日志能展示与同步请求一致的完整计算过程，而不只有最终金额。
+		var breakdown AsyncBillingBreakdown
+		if explainer, ok := adaptor.(AsyncBillingExplainer); ok {
+			breakdown = explainer.ExplainBillingOnComplete(task, taskResult)
+		}
+		recalculateTaskQuotaWithBreakdown(ctx, task, actualQuota, "adaptor计费调整", breakdown)
 		return
 	}
 	// 2. 回退到 token 重算

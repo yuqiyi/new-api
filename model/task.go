@@ -294,10 +294,17 @@ func TaskGetAllTasks(startIdx int, num int, queryParams SyncTaskQueryParams) []*
 	return tasks
 }
 
+// GetTimedOutUnfinishedTasks selects stale tasks for the timeout sweeper.
+//
+// Status is the sole liveness predicate here, deliberately without the
+// `progress != '100%'` filter that GetAllUnFinishSyncTasks uses. A task whose
+// progress reached 100% while its status stayed non-terminal is inconsistent,
+// and filtering on progress would make it invisible to both sweeps — hanging
+// forever with its pre-charged quota never settled nor refunded. Letting the
+// timeout sweeper see it guarantees every task eventually settles or refunds.
 func GetTimedOutUnfinishedTasks(cutoffUnix int64, limit int) []*Task {
 	var tasks []*Task
-	err := DB.Where("progress != ?", "100%").
-		Where("status NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
+	err := DB.Where("status NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
 		Where("submit_time < ?", cutoffUnix).
 		Order("submit_time").
 		Limit(limit).
@@ -311,8 +318,11 @@ func GetTimedOutUnfinishedTasks(cutoffUnix int64, limit int) []*Task {
 func GetAllUnFinishSyncTasks(limit int) []*Task {
 	var tasks []*Task
 	var err error
-	// get all tasks progress is not 100%
-	err = DB.Where("progress != ?", "100%").Where("status != ?", TaskStatusFailure).Where("status != ?", TaskStatusSuccess).Limit(limit).Order("id").Find(&tasks).Error
+	// Liveness is decided by status alone. Progress is display metadata and can
+	// legitimately read 100% before a terminal status is committed; excluding
+	// those rows would strand them outside every polling pass, leaving the
+	// pre-charged quota unsettled.
+	err = DB.Where("status != ?", TaskStatusFailure).Where("status != ?", TaskStatusSuccess).Limit(limit).Order("id").Find(&tasks).Error
 	if err != nil {
 		return nil
 	}

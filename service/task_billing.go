@@ -127,6 +127,22 @@ func taskAdjustTokenQuota(ctx context.Context, task *model.Task, delta int) {
 	}
 }
 
+// breakdownTokenCounts extracts the token columns from a settlement breakdown.
+// They are stored as log columns rather than only inside `other` because the
+// log detail's token section reads the columns.
+func breakdownTokenCounts(breakdown AsyncBillingBreakdown) (promptTokens int, completionTokens int) {
+	if breakdown == nil {
+		return 0, 0
+	}
+	if v, ok := breakdown["prompt_tokens"].(int); ok {
+		promptTokens = v
+	}
+	if v, ok := breakdown["completion_tokens"].(int); ok {
+		completionTokens = v
+	}
+	return promptTokens, completionTokens
+}
+
 // taskBillingOther 从 task 的 BillingContext 构建日志 Other 字段。
 func taskBillingOther(task *model.Task) map[string]interface{} {
 	other := make(map[string]interface{})
@@ -217,6 +233,12 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 // reason 用于日志记录（例如 "token重算" 或 "adaptor调整"）。
 // clamps 可选：若计算 actualQuota 时发生额度饱和，将其记入日志 admin_info（仅管理员可见）。
 func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int, reason string, clamps ...*common.QuotaClamp) {
+	recalculateTaskQuotaWithBreakdown(ctx, task, actualQuota, reason, nil, clamps...)
+}
+
+// recalculateTaskQuotaWithBreakdown is RecalculateTaskQuota plus the optional
+// settlement breakdown an adaptor reported, merged into the consume log.
+func recalculateTaskQuotaWithBreakdown(ctx context.Context, task *model.Task, actualQuota int, reason string, settlementBreakdown AsyncBillingBreakdown, clamps ...*common.QuotaClamp) {
 	if actualQuota <= 0 {
 		return
 	}
@@ -266,20 +288,28 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	other["task_id"] = task.TaskID
 	other["pre_consumed_quota"] = preConsumedQuota
 	other["actual_quota"] = actualQuota
+	// Token counts and per-modality ratios, when the adaptor supplied them, so
+	// the log shows the arithmetic rather than only the final amount.
+	for k, v := range settlementBreakdown {
+		other[k] = v
+	}
 	for _, clamp := range clamps {
 		attachQuotaSaturationToOther(other, clamp)
 	}
+	promptTokens, completionTokens := breakdownTokenCounts(settlementBreakdown)
 	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
-		UserId:    task.UserId,
-		LogType:   logType,
-		Content:   reason,
-		ChannelId: task.ChannelId,
-		ModelName: taskModelName(task),
-		Quota:     logQuota,
-		TokenId:   task.PrivateData.TokenId,
-		Group:     task.Group,
-		Other:     other,
-		NodeName:  task.PrivateData.NodeName,
+		UserId:           task.UserId,
+		LogType:          logType,
+		Content:          reason,
+		PromptTokens:     promptTokens,
+		CompletionTokens: completionTokens,
+		ChannelId:        task.ChannelId,
+		ModelName:        taskModelName(task),
+		Quota:            logQuota,
+		TokenId:          task.PrivateData.TokenId,
+		Group:            task.Group,
+		Other:            other,
+		NodeName:         task.PrivateData.NodeName,
 	})
 }
 

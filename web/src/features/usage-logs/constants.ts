@@ -209,6 +209,7 @@ export const TASK_PLATFORMS = {
   RUNWAY: 'runway',
   LUMA: 'luma',
   VIGGLE: 'viggle',
+  GEMINI_INTERACTIONS: 'gemini_interactions',
 } as const
 
 // ============================================================================
@@ -324,6 +325,10 @@ export const TASK_PLATFORM_MAPPINGS: Record<string, StatusMapping> = {
   [TASK_PLATFORMS.RUNWAY]: { label: 'runway', variant: 'violet' },
   [TASK_PLATFORMS.LUMA]: { label: 'luma', variant: 'orange' },
   [TASK_PLATFORMS.VIGGLE]: { label: 'viggle', variant: 'pink' },
+  [TASK_PLATFORMS.GEMINI_INTERACTIONS]: {
+    label: 'gemini',
+    variant: 'cyan',
+  },
 }
 
 // ============================================================================

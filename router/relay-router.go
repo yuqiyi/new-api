@@ -1,10 +1,12 @@
 package router
 
 import (
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/controller"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/relay"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 
 	"github.com/gin-gonic/gin"
@@ -199,8 +201,14 @@ func SetRelayRouter(router *gin.Engine) {
 	relayGeminiRouter.Use(middleware.Distribute())
 	{
 		// Gemini Interactions API supports multimodal generation through a model
-		// specified in the request body.
+		// specified in the request body. "background": true switches it to the
+		// async task pipeline; everything else stays on the synchronous relay.
 		relayGeminiRouter.POST("/interactions", func(c *gin.Context) {
+			if isBackgroundInteraction(c) {
+				c.Set("platform", string(constant.TaskPlatformGeminiInteractions))
+				controller.RelayTask(c)
+				return
+			}
 			controller.Relay(c, types.RelayFormatGemini)
 		})
 
@@ -209,6 +217,27 @@ func SetRelayRouter(router *gin.Engine) {
 			controller.Relay(c, types.RelayFormatGemini)
 		})
 	}
+
+	// Background interaction polling. Deliberately without Distribute(): the
+	// channel comes from the stored task, and a GET has no body for the
+	// distributor to read a model name from.
+	geminiFetchRouter := router.Group("/v1beta")
+	geminiFetchRouter.Use(middleware.RouteTag("relay"))
+	geminiFetchRouter.Use(middleware.TokenAuth())
+	{
+		geminiFetchRouter.GET("/interactions/:interaction_id", controller.RelayGeminiInteractionFetch)
+	}
+}
+
+// isBackgroundInteraction reports whether the client asked for background
+// execution. A malformed body is left to the synchronous path so it produces the
+// normal validation error instead of a task-shaped one.
+func isBackgroundInteraction(c *gin.Context) bool {
+	request := &dto.GeminiInteractionsRequest{}
+	if err := common.UnmarshalBodyReusable(c, request); err != nil {
+		return false
+	}
+	return request.IsBackground()
 }
 
 func registerMjRouterGroup(relayMjRouter *gin.RouterGroup) {

@@ -85,6 +85,18 @@ func GeminiInteractionsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	return estimatedGeminiInteractionsUsage(info), nil
 }
 
+// ParseInteractionsUsage extracts the usage breakdown from an Interactions
+// payload. Background (async) completions carry the same `usage` object as
+// synchronous responses, so async settlement reuses this parser to keep token
+// attribution — including the per-modality arrays — identical on both paths.
+func ParseInteractionsUsage(payload []byte) *dto.Usage {
+	usage, found := geminiInteractionsUsageFromPayload(payload, &relaycommon.RelayInfo{})
+	if !found {
+		return nil
+	}
+	return usage
+}
+
 func geminiInteractionsUsageFromPayload(payload []byte, info *relaycommon.RelayInfo) (*dto.Usage, bool) {
 	root := gjson.ParseBytes(payload)
 	if !root.IsObject() {

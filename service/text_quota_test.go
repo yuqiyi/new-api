@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	hosttypes "github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -1147,4 +1148,118 @@ func TestCalculateTextQuotaSummaryVideoOutputNeverCredits(t *testing.T) {
 	// prompt 10 + image 40*5 = 200 + video 80*7 = 560 => 770
 	assert.Equal(t, 770, summary.Quota)
 	assert.GreaterOrEqual(t, summary.Quota, 0)
+}
+
+// TestSettleAsyncInteractionQuotaMatchesSyncPath is the load-bearing test for
+// background execution billing. A Gemini background interaction returns the same
+// usage object as its synchronous counterpart, so the settled quota must match
+// what the synchronous path would have charged — otherwise running the same
+// request with "background": true would silently change the price.
+func TestSettleAsyncInteractionQuotaMatchesSyncPath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	const modelName = "gemini-omni-billing-equivalence-test"
+	const groupRatio = 1.0
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(
+		`{"`+modelName+`": 0.75}`))
+	require.NoError(t, ratio_setting.UpdateCompletionRatioByJSONString(
+		`{"`+modelName+`": 6}`))
+	require.NoError(t, ratio_setting.UpdateVideoOutputRatioByJSONString(
+		`{"`+modelName+`": 11.666667}`))
+
+	// Real usage from an observed background completion: 13 text input,
+	// 57920 video output, 366 thought, 579 text output.
+	newUsage := func() *dto.Usage {
+		u := &dto.Usage{
+			PromptTokens:     13,
+			CompletionTokens: 58865,
+			TotalTokens:      59244,
+		}
+		u.PromptTokensDetails.TextTokens = 13
+		u.CompletionTokenDetails.VideoTokens = 57920
+		u.CompletionTokenDetails.ReasoningTokens = 366
+		return u
+	}
+
+	syncRelayInfo := &relaycommon.RelayInfo{
+		RelayFormat:             types.RelayFormatGemini,
+		FinalRequestRelayFormat: types.RelayFormatGemini,
+		OriginModelName:         modelName,
+		PriceData: hosttypes.PriceData{
+			ModelRatio:       0.75,
+			CompletionRatio:  6,
+			VideoOutputRatio: 11.666667,
+			GroupRatioInfo:   hosttypes.GroupRatioInfo{GroupRatio: groupRatio},
+		},
+		StartTime: time.Now(),
+	}
+
+	syncQuota := calculateTextQuotaSummary(ctx, syncRelayInfo, newUsage()).Quota
+	asyncQuota, clamp := SettleAsyncInteractionQuota(modelName, groupRatio, newUsage(), nil)
+
+	assert.Nil(t, clamp)
+	assert.Equal(t, syncQuota, asyncQuota,
+		"background settlement must charge the same as the synchronous path")
+	assert.Positive(t, asyncQuota)
+}
+
+// TestSettleAsyncInteractionQuotaAppliesOtherRatios ensures the pre-charge
+// multipliers captured on the task (duration, resolution) still apply at
+// settlement, so an async charge cannot drop them and undercharge.
+func TestSettleAsyncInteractionQuotaAppliesOtherRatios(t *testing.T) {
+	const modelName = "gemini-omni-other-ratio-test"
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"`+modelName+`": 1}`))
+	require.NoError(t, ratio_setting.UpdateCompletionRatioByJSONString(`{"`+modelName+`": 1}`))
+
+	usage := &dto.Usage{PromptTokens: 100, CompletionTokens: 100, TotalTokens: 200}
+
+	base, _ := SettleAsyncInteractionQuota(modelName, 1, usage, nil)
+	doubled, _ := SettleAsyncInteractionQuota(modelName, 1, usage, map[string]float64{"seconds": 2})
+
+	assert.Positive(t, base)
+	assert.Equal(t, base*2, doubled)
+}
+
+// TestSettleAsyncInteractionQuotaNilUsage guards against charging when the
+// upstream payload carried no usage at all.
+func TestSettleAsyncInteractionQuotaNilUsage(t *testing.T) {
+	quota, clamp := SettleAsyncInteractionQuota("any-model", 1, nil, nil)
+	assert.Zero(t, quota)
+	assert.Nil(t, clamp)
+}
+
+// TestSettleAsyncInteractionQuotaReportsBreakdown covers the auditability
+// requirement: an async settlement must report the token counts and ratios that
+// produced the charge, otherwise the task log shows only a final amount and the
+// billing cannot be verified.
+func TestSettleAsyncInteractionQuotaReportsBreakdown(t *testing.T) {
+	const modelName = "gemini-omni-breakdown-test"
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"`+modelName+`": 0.75}`))
+	require.NoError(t, ratio_setting.UpdateCompletionRatioByJSONString(`{"`+modelName+`": 6}`))
+	require.NoError(t, ratio_setting.UpdateVideoOutputRatioByJSONString(`{"`+modelName+`": 11.666667}`))
+
+	usage := &dto.Usage{PromptTokens: 13, CompletionTokens: 58865, TotalTokens: 59244}
+	usage.PromptTokensDetails.TextTokens = 13
+	usage.CompletionTokenDetails.VideoTokens = 57920
+	usage.CompletionTokenDetails.ReasoningTokens = 366
+
+	quota, clamp, breakdown := SettleAsyncInteractionQuotaDetailed(modelName, 1.6, usage, nil)
+
+	require.Nil(t, clamp)
+	assert.Positive(t, quota)
+	require.NotNil(t, breakdown)
+
+	assert.Equal(t, 13, breakdown["prompt_tokens"])
+	assert.Equal(t, 58865, breakdown["completion_tokens"])
+	assert.Equal(t, 57920, breakdown["video_output_tokens"])
+	assert.Equal(t, 366, breakdown["reasoning_tokens"])
+	assert.Equal(t, true, breakdown["video_output_cal"])
+	assert.Equal(t, 0.75, breakdown["model_ratio"])
+	assert.Equal(t, 1.6, breakdown["group_ratio"])
+	assert.Equal(t, float64(6), breakdown["completion_ratio"])
+	assert.Equal(t, 11.666667, breakdown["video_output_ratio"])
+	// 58865 output - 57920 video = 945 non-video output (text + reasoning).
+	assert.Equal(t, 945, breakdown["text_output"])
 }

@@ -17,6 +17,7 @@ import (
 type GeminiInteractionsRequest struct {
 	Model           string
 	Stream          *bool
+	Background      *bool
 	MaxOutputTokens *uint
 	Body            map[string]json.RawMessage
 }
@@ -32,6 +33,7 @@ func (r *GeminiInteractionsRequest) UnmarshalJSON(data []byte) error {
 
 	r.Model = ""
 	r.Stream = nil
+	r.Background = nil
 	r.MaxOutputTokens = nil
 	r.Body = body
 	if value, ok := body["model"]; ok {
@@ -45,6 +47,13 @@ func (r *GeminiInteractionsRequest) UnmarshalJSON(data []byte) error {
 			return err
 		}
 		r.Stream = &stream
+	}
+	if value, ok := body["background"]; ok {
+		var background bool
+		if err := kitutil.Unmarshal(value, &background); err != nil {
+			return err
+		}
+		r.Background = &background
 	}
 	for _, key := range []string{"max_output_tokens", "maxOutputTokens"} {
 		value, ok := body[key]
@@ -141,6 +150,11 @@ func collectGeminiInteractionText(value gjson.Result, text *strings.Builder) {
 			return true
 		})
 	}
+}
+
+// IsBackground reports whether the client asked for background execution.
+func (r *GeminiInteractionsRequest) IsBackground() bool {
+	return r != nil && r.Background != nil && *r.Background
 }
 
 func (r *GeminiInteractionsRequest) IsStream(request *http.Request) bool {
