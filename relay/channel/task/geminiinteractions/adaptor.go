@@ -183,8 +183,9 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 		ti.Status = model.TaskStatusFailure
 		ti.Progress = taskcommon.ProgressComplete
 		ti.Reason = fmt.Sprintf("upstream interaction %s", interaction.Status)
-		if interaction.Error != nil && interaction.Error.Message != "" {
-			ti.Reason = interaction.Error.Message
+		if interaction.Error != "" && interaction.UpstreamError != nil &&
+			interaction.UpstreamError.Error != nil && interaction.UpstreamError.Error.Message != "" {
+			ti.Reason = interaction.UpstreamError.Error.Message
 		}
 	case statusInProgress, statusRequiresAction:
 		// requires_action means the upstream awaits client input. Video
@@ -193,10 +194,11 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 		ti.Status = model.TaskStatusInProgress
 		ti.Progress = taskcommon.ProgressInProgress
 	default:
-		if interaction.Error != nil && interaction.Error.Message != "" {
+		if interaction.Error != "" && interaction.UpstreamError != nil &&
+			interaction.UpstreamError.Error != nil && interaction.UpstreamError.Error.Message != "" {
 			ti.Status = model.TaskStatusFailure
 			ti.Progress = taskcommon.ProgressComplete
-			ti.Reason = interaction.Error.Message
+			ti.Reason = interaction.UpstreamError.Error.Message
 			return ti, nil
 		}
 		// Unknown status: stay in progress rather than settling on a guess.

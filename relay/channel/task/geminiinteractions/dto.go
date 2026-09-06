@@ -4,14 +4,18 @@ package geminiinteractions
 // adaptor needs for routing, progress and billing. The full body is stored on
 // the task so a client polling us receives the upstream shape verbatim.
 type interactionResponse struct {
-	ID     string `json:"id"`
-	Object string `json:"object"`
-	Model  string `json:"model"`
-	Status string `json:"status"`
-	Error  *struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
-	} `json:"error,omitempty"`
+	ID            string `json:"id"`
+	Object        string `json:"object"`
+	Model         string `json:"model"`
+	Status        string `json:"status"`
+	Error         string `json:"error,omitempty"`
+	RequestID     string `json:"request_id,omitempty"`
+	UpstreamError *struct {
+		Error *struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error,omitempty"`
+	} `json:"upstream_error,omitempty"`
 }
 
 // Upstream execution states. Source: Gemini API background execution docs.
