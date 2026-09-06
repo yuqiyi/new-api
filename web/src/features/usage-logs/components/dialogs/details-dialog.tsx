@@ -280,16 +280,6 @@ function BillingBreakdown(props: {
     }
   }
 
-  const userGR = other.user_group_ratio
-  const isUserGR = userGR != null && Number.isFinite(userGR) && userGR !== -1
-  const effectiveGR = isUserGR ? userGR : other.group_ratio
-  if (effectiveGR != null && Number.isFinite(effectiveGR)) {
-    rows.push({
-      label: isUserGR ? t('User Exclusive Ratio') : t('Group Ratio'),
-      value: `${formatRatio(effectiveGR)}x`,
-    })
-  }
-
   if (!isTieredExpr && isClaude && hasAnyCacheTokens(other)) {
     if (other.cache_ratio != null && other.cache_ratio !== 1) {
       rows.push({
@@ -358,6 +348,13 @@ function BillingBreakdown(props: {
       })
     }
 
+    if (other.video_output_ratio != null && other.video_output_ratio !== 1) {
+      rows.push({
+        label: t('Video output price'),
+        value: `${fmtPrice(baseInputUSD * other.video_output_ratio)}/M`,
+      })
+    }
+
     if (other.video_seconds != null && other.video_seconds !== 0) {
       rows.push({
         label: t('Video seconds'),
@@ -378,6 +375,16 @@ function BillingBreakdown(props: {
         value: `${fmtPrice(other.video_seconds_price)}/s`,
       })
     }
+  }
+
+  const userGR = other.user_group_ratio
+  const isUserGR = userGR != null && Number.isFinite(userGR) && userGR !== -1
+  const effectiveGR = isUserGR ? userGR : other.group_ratio
+  if (effectiveGR != null && Number.isFinite(effectiveGR)) {
+    rows.push({
+      label: isUserGR ? t('User Exclusive Ratio') : t('Group Ratio'),
+      value: `${formatRatio(effectiveGR)}x`,
+    })
   }
 
   if (other.web_search && other.web_search_call_count) {

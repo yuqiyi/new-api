@@ -120,10 +120,10 @@ func geminiInteractionsUsageFromPayload(payload []byte, info *relaycommon.RelayI
 	}
 
 	usage := &dto.Usage{
-		PromptTokens:     geminiInteractionToken(usageRoot, info, "input_tokens", "total_input_tokens", "inputTokenCount", "input_token_count", "prompt_tokens", "promptTokenCount", "prompt_token_count"),
-		CompletionTokens: geminiInteractionToken(usageRoot, info, "output_tokens", "total_output_tokens", "outputTokenCount", "output_token_count", "candidatesTokenCount", "candidates_token_count"),
-		TotalTokens:      geminiInteractionToken(usageRoot, info, "total_tokens", "totalTokenCount", "total_token_count"),
+		PromptTokens: geminiInteractionToken(usageRoot, info, "input_tokens", "total_input_tokens", "inputTokenCount", "input_token_count", "prompt_tokens", "promptTokenCount", "prompt_token_count"),
+		TotalTokens:  geminiInteractionToken(usageRoot, info, "total_tokens", "totalTokenCount", "total_token_count"),
 	}
+	usage.CompletionTokens = usage.TotalTokens - usage.PromptTokens
 	usage.PromptTokensDetails.CachedTokens = geminiInteractionToken(usageRoot, info, "cached_tokens", "total_cached_tokens", "input_tokens_details.cached_tokens", "cachedContentTokenCount", "cached_content_token_count")
 	usage.PromptTokensDetails.ImageTokens = geminiInteractionToken(usageRoot, info, "input_image_tokens", "input_tokens_details.image_tokens", "inputImageTokenCount")
 	usage.PromptTokensDetails.AudioTokens = geminiInteractionToken(usageRoot, info, "input_audio_tokens", "input_tokens_details.audio_tokens", "inputAudioTokenCount")

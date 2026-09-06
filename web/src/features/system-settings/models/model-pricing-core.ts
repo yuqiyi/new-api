@@ -310,9 +310,9 @@ export function buildPreviewRows(
       key: 'imageOutput',
       label: t('Image output price'),
       value:
-          laneEnabled.imageOutput && lanePrices.imageOutput
-              ? `$${lanePrices.imageOutput}`
-              : t('Empty'),
+        laneEnabled.imageOutput && lanePrices.imageOutput
+          ? `$${lanePrices.imageOutput}`
+          : t('Empty'),
     },
     {
       key: 'videoOutput',

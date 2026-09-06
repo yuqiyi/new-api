@@ -671,6 +671,7 @@ var defaultImageOutputRatio = map[string]float64{
 // published pricing. Text output for the same model stays on CompletionRatio.
 var defaultVideoOutputRatio = map[string]float64{
 	"gemini-omni-flash-preview": 11.666667,
+	"gemini-omni-1.1-flash": 11.666667,
 }
 var imageRatioMap = types.NewRWMap[string, float64]()
 var imageOutputRatioMap = types.NewRWMap[string, float64]()

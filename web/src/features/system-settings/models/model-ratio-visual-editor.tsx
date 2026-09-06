@@ -541,8 +541,8 @@ const ModelRatioVisualEditorComponent = forwardRef<
         silent: true,
       })
       const imageOutputMap = safeJsonParse<Record<string, number>>(imageOutputRatio, {
-          fallback: {},
-          silent: true,
+        fallback: {},
+        silent: true,
       })
       const videoOutputMap = safeJsonParse<Record<string, number>>(videoOutputRatio, {
           fallback: {},
@@ -888,6 +888,7 @@ export const ModelRatioVisualEditor = memo(
       prevProps.savedCreateCacheRatio === nextProps.savedCreateCacheRatio &&
       prevProps.savedCompletionRatio === nextProps.savedCompletionRatio &&
       prevProps.savedImageRatio === nextProps.savedImageRatio &&
+      prevProps.savedImageOutputRatio === nextProps.savedImageOutputRatio &&
       prevProps.savedAudioRatio === nextProps.savedAudioRatio &&
       prevProps.savedAudioCompletionRatio ===
         nextProps.savedAudioCompletionRatio &&

@@ -495,6 +495,7 @@ export function ModelMutateDrawer({
           cacheRatio,
           completionRatio,
           imageRatio,
+          imageOutputRatio,
           audioRatio,
           audioCompletionRatio,
           ...modelData
@@ -618,7 +619,7 @@ export function ModelMutateDrawer({
                   )
                 }
                 if (values.imageOutputRatio && values.imageOutputRatio !== '') {
-                  imageMap[finalModelName] = Number.parseFloat(
+                  imageOutputMap[finalModelName] = Number.parseFloat(
                     values.imageOutputRatio
                   )
                 }
